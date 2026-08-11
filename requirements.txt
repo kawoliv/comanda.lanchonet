@@ -1,0 +1,3 @@
+# Única dependência externa: geração das planilhas de fechamento.
+# Tkinter e sqlite3 já fazem parte da biblioteca padrão do Python.
+openpyxl>=3.1
