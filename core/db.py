@@ -8,10 +8,18 @@ em dados/caixa.db, o que também facilita o backup (basta copiar o arquivo).
 
 import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Empacotado com PyInstaller (--onefile), __file__ aponta para a pasta
+# temporária de extração (_MEIPASS), que é apagada a cada execução. Nesse
+# caso usamos a pasta do .exe para que dados/ e relatorios/ persistam.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
+
 PASTA_DADOS = BASE_DIR / "dados"
 PASTA_RELATORIOS = BASE_DIR / "relatorios"
 

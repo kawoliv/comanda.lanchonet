@@ -162,10 +162,27 @@ congelamento de preço no histórico, geração da planilha e consulta ao histó
 
 ---
 
+## Gerar o executável (.exe)
+
+Para rodar no computador do balcão sem precisar instalar Python:
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name CaixaLanchonete app.py
+```
+
+O `.exe` fica em `dist/CaixaLanchonete.exe`. Copie só esse arquivo para a outra
+máquina — `dados/` e `relatorios/` são criados automaticamente do lado dele na
+primeira execução (`core/db.py` detecta quando está empacotado e usa a pasta do
+`.exe`, não uma pasta temporária). Para atualizar o sistema, feche o programa,
+rode o `pyinstaller` de novo e substitua o `.exe`; o banco em `dados/caixa.db`
+não é tocado.
+
+---
+
 ## Possíveis próximos passos
 
 - Impressão de comprovante/cupom da venda
 - Controle de estoque com baixa automática por item vendido
 - Relatório consolidado por período (semana/mês) em uma planilha só
 - Perfis de acesso: atendente não fecha caixa nem edita preços
-- Empacotamento em `.exe` com PyInstaller para instalar no balcão sem Python
