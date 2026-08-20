@@ -3,3 +3,6 @@ __pycache__/
 dados/*.db
 relatorios/*.xlsx
 .venv/
+build/
+dist/
+*.spec

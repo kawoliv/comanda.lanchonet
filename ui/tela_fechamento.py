@@ -19,6 +19,11 @@ class TelaFechamento(ttk.Frame):
         super().__init__(pai, style="TFrame")
         self.app = app
         self.caixa_id = None
+        # Conferência de gaveta persiste enquanto o mesmo caixa segue aberto,
+        # mesmo que a tela seja reconstruída (navegar de aba ou "Atualizar").
+        # Isso impede reabrir a contagem às cegas só recarregando a tela.
+        self.conferido = False
+        self.valor_contado_centavos = None
 
         barra = ttk.Frame(self)
         barra.pack(fill="x", pady=(0, 12))
@@ -36,8 +41,16 @@ class TelaFechamento(ttk.Frame):
 
         caixa = servicos.caixa_aberto()
         if caixa is None:
+            self.caixa_id = None
+            self.conferido = False
+            self.valor_contado_centavos = None
             self._montar_caixa_fechado()
         else:
+            if self.caixa_id != caixa["id"]:
+                # Caixa diferente do que estava sendo conferido (ex.: reabriu
+                # depois de fechar) — a contagem anterior não vale mais aqui.
+                self.conferido = False
+                self.valor_contado_centavos = None
             self.caixa_id = caixa["id"]
             self._montar_caixa_aberto(servicos.resumo_caixa(caixa["id"]))
 
@@ -73,7 +86,6 @@ class TelaFechamento(ttk.Frame):
             ("Vendas", str(resumo["qtd_vendas"]), None),
             ("Itens vendidos", str(resumo["qtd_itens"]), None),
             ("Ticket médio", formatar(resumo["ticket_medio_centavos"]), None),
-            ("Esperado na gaveta", formatar(resumo["esperado_gaveta_centavos"]), CORES["primaria"]),
         ]
         for coluna, (titulo, valor, cor) in enumerate(dados):
             cartao = cartao_indicador(indicadores, titulo, valor, cor)
@@ -144,8 +156,32 @@ class TelaFechamento(ttk.Frame):
 
         ttk.Label(interno, text="Conferência da gaveta", style="Subtitulo.TLabel").pack(anchor="w")
 
-        detalhes = ttk.Frame(interno, style="Painel.TFrame")
-        detalhes.pack(fill="x", pady=(12, 4))
+        ttk.Label(interno,
+                  text="Conte o dinheiro físico da gaveta antes de olhar qualquer total do "
+                       "sistema. O valor esperado só aparece depois de você confirmar a "
+                       "contagem — assim a conferência é confiável.",
+                  style="Suave.TLabel", wraplength=320).pack(anchor="w", pady=(10, 14))
+
+        ttk.Label(interno, text="Dinheiro contado na gaveta (R$)",
+                  style="Painel.TLabel").pack(anchor="w")
+        self.campo_contado = ttk.Entry(interno, font=("TkDefaultFont", 16))
+        self.campo_contado.pack(fill="x", pady=(4, 4), ipady=6)
+        self.campo_contado.bind("<Return>", lambda _: self._conferir_contagem(resumo))
+
+        self.rotulo_erro_contagem = ttk.Label(interno, text="", style="Painel.TLabel",
+                                              foreground=CORES["perigo"])
+        self.rotulo_erro_contagem.pack(anchor="w", pady=(0, 8))
+
+        self.botao_conferir = ttk.Button(interno, text="Conferir contagem",
+                                         style="Primario.TButton",
+                                         command=lambda: self._conferir_contagem(resumo))
+        self.botao_conferir.pack(fill="x")
+
+        # Revelado só depois da contagem confirmada — ver _conferir_contagem.
+        self.frame_revelado = ttk.Frame(interno, style="Painel.TFrame")
+
+        detalhes = ttk.Frame(self.frame_revelado, style="Painel.TFrame")
+        detalhes.pack(fill="x", pady=(14, 4))
         detalhes.columnconfigure(1, weight=1)
 
         linhas = [
@@ -162,21 +198,14 @@ class TelaFechamento(ttk.Frame):
                       font=("TkDefaultFont", 11, "bold" if negrito else "normal")).grid(
                 row=indice, column=1, sticky="e", pady=3)
 
-        ttk.Label(interno, text="Cartão, PIX e vale não passam pela gaveta.",
-                  style="Suave.TLabel").pack(anchor="w", pady=(2, 14))
+        ttk.Label(self.frame_revelado, text="Cartão, PIX e vale não passam pela gaveta.",
+                  style="Suave.TLabel").pack(anchor="w", pady=(2, 10))
 
-        ttk.Separator(interno).pack(fill="x", pady=(0, 14))
-
-        ttk.Label(interno, text="Dinheiro contado na gaveta (R$)",
-                  style="Painel.TLabel").pack(anchor="w")
-        self.campo_contado = ttk.Entry(interno, font=("TkDefaultFont", 16))
-        self.campo_contado.pack(fill="x", pady=(4, 4), ipady=6)
-        self.campo_contado.insert(0, formatar(resumo["esperado_gaveta_centavos"]).replace("R$ ", ""))
-        self.campo_contado.bind("<KeyRelease>", lambda _: self._atualizar_diferenca(resumo))
-
-        self.rotulo_diferenca = ttk.Label(interno, text="", style="Painel.TLabel",
+        self.rotulo_diferenca = ttk.Label(self.frame_revelado, text="", style="Painel.TLabel",
                                           font=("TkDefaultFont", 12, "bold"))
-        self.rotulo_diferenca.pack(anchor="w", pady=(0, 12))
+        self.rotulo_diferenca.pack(anchor="w")
+
+        ttk.Separator(interno).pack(fill="x", pady=14)
 
         ttk.Label(interno, text="Observações (opcional)", style="Painel.TLabel").pack(anchor="w")
         self.campo_observacoes = tk.Text(interno, height=3, font=("TkDefaultFont", 10),
@@ -184,20 +213,35 @@ class TelaFechamento(ttk.Frame):
                                          highlightthickness=0, wrap="word")
         self.campo_observacoes.pack(fill="x", pady=(4, 12))
 
-        ttk.Button(interno, text="FECHAR CAIXA E GERAR PLANILHA", style="Sucesso.TButton",
-                   command=self.fechar_caixa).pack(fill="x")
+        self.botao_fechar = ttk.Button(interno, text="FECHAR CAIXA E GERAR PLANILHA",
+                                       style="Sucesso.TButton", state="disabled",
+                                       command=self.fechar_caixa)
+        self.botao_fechar.pack(fill="x")
         ttk.Label(interno, text="Depois de fechado, o caixa não aceita mais vendas "
                                 "e passa a ficar disponível no Histórico.",
                   style="Suave.TLabel", wraplength=320).pack(anchor="w", pady=(8, 0))
 
-        self._atualizar_diferenca(resumo)
+        if self.conferido:
+            # Tela reconstruída (Atualizar / troca de aba) com este mesmo
+            # caixa já conferido — reabre já travado, sem voltar à contagem cega.
+            self.campo_contado.insert(0, formatar(self.valor_contado_centavos).replace("R$ ", ""))
+            self._revelar(resumo, self.valor_contado_centavos)
+        else:
+            self.campo_contado.focus_set()
 
-    def _atualizar_diferenca(self, resumo):
+    def _conferir_contagem(self, resumo):
         try:
             contado = para_centavos(self.campo_contado.get())
-        except ValorInvalido:
-            self.rotulo_diferenca.configure(text="Valor inválido", foreground=CORES["perigo"])
+        except ValorInvalido as erro:
+            self.rotulo_erro_contagem.configure(text=str(erro))
             return
+
+        self.rotulo_erro_contagem.configure(text="")
+        self._revelar(resumo, contado)
+
+    def _revelar(self, resumo, contado):
+        self.conferido = True
+        self.valor_contado_centavos = contado
 
         diferenca = contado - resumo["esperado_gaveta_centavos"]
         if diferenca == 0:
@@ -210,14 +254,21 @@ class TelaFechamento(ttk.Frame):
             self.rotulo_diferenca.configure(text=f"Falta {formatar(-diferenca)}",
                                             foreground=CORES["perigo"])
 
+        # Trava o valor contado: depois de revelado o esperado, não dá mais
+        # para "ajustar" a contagem digitada às cegas.
+        self.campo_contado.configure(state="readonly")
+        self.botao_conferir.pack_forget()
+        self.frame_revelado.pack(fill="x")
+        self.botao_fechar.configure(state="normal")
+
     # ------------------------------------------------------------------ #
 
     def fechar_caixa(self):
-        try:
-            contado = para_centavos(self.campo_contado.get())
-        except ValorInvalido as erro:
-            messagebox.showwarning("Valor inválido", str(erro))
+        if not self.conferido or self.valor_contado_centavos is None:
+            messagebox.showwarning("Conferência pendente",
+                                    "Confirme a contagem da gaveta antes de fechar o caixa.")
             return
+        contado = self.valor_contado_centavos
 
         resumo = servicos.resumo_caixa(self.caixa_id)
         diferenca = contado - resumo["esperado_gaveta_centavos"]
