@@ -44,6 +44,21 @@ cardápio inicial de exemplo e o funcionário "Gerente".
 4. **Planilha** — no fechamento é gerado um `.xlsx` em `relatorios/`.
 5. **Histórico** — dias fechados ficam disponíveis para consulta e para reabrir a planilha.
 
+### Modo Gerente (acesso administrativo)
+
+O Cardápio (criar produto, editar nome/categoria/preço, remover) só pode ser alterado
+com o **Modo Gerente** ligado — um botão no cabeçalho pede login e senha. Sem ele, a
+tela de Cardápio fica só para consulta (atendente não muda preço).
+
+- Só um funcionário com **cargo "Gerente"** pode ter login e senha.
+- O login fica ligado até alguém desligar o Modo Gerente, trocar de operador ou
+  fechar o sistema — não precisa relogar a cada alteração.
+- Cadastrar ou editar outro funcionário com cargo Gerente (e, portanto, dar a ele
+  login/senha administrativos) também exige estar com o Modo Gerente já ligado —
+  senão um atendente poderia se autopromover.
+- **Credencial semeada na primeira execução:** login `gerente`, senha `gerente123`
+  (ver `core/db.py`). Troque a senha em **Equipe → Editar** assim que possível.
+
 ### Atalhos de teclado
 
 | Tecla | Ação |
@@ -80,9 +95,10 @@ caixa-lanchonete/
 ├── requirements.txt
 ├── core/                   # regra de negócio e dados (não conhece a interface)
 │   ├── moeda.py            # valores em centavos, parsing e formatação
+│   ├── auth.py             # hash e verificação da senha do Gerente
 │   ├── db.py               # conexão e esquema SQLite
 │   ├── repositorio.py      # todo o SQL do projeto
-│   ├── servicos.py         # abrir caixa, vender, cancelar, fechar
+│   ├── servicos.py         # abrir caixa, vender, cancelar, fechar, login do Gerente
 │   └── planilha.py         # geração do .xlsx
 ├── ui/                     # interface Tkinter
 │   ├── estilo.py           # tema, cores e fontes
@@ -93,7 +109,7 @@ caixa-lanchonete/
 │   ├── tela_historico.py   # consulta de dias anteriores
 │   ├── tela_produtos.py    # cardápio
 │   └── tela_equipe.py      # funcionários
-├── testes/test_core.py     # 15 testes das regras de negócio
+├── testes/test_core.py     # testes das regras de negócio
 ├── dados/                  # banco SQLite (criado na 1ª execução)
 └── relatorios/             # planilhas geradas nos fechamentos
 ```
@@ -158,7 +174,8 @@ python -m unittest discover testes
 
 Cobrem conversão e formatação de valores, bloqueio de caixa duplicado, recusa de
 venda com caixa fechado, cálculo da diferença de gaveta, cancelamento de venda,
-congelamento de preço no histórico, geração da planilha e consulta ao histórico.
+congelamento de preço no histórico, geração da planilha, consulta ao histórico,
+hash/verificação de senha e as regras de login do Gerente.
 
 ---
 
@@ -185,4 +202,5 @@ não é tocado.
 - Impressão de comprovante/cupom da venda
 - Controle de estoque com baixa automática por item vendido
 - Relatório consolidado por período (semana/mês) em uma planilha só
-- Perfis de acesso: atendente não fecha caixa nem edita preços
+- Perfis de acesso — feito: atendente não edita o Cardápio sem Modo Gerente.
+  Falta: restringir também o fechamento de caixa e outras telas administrativas.

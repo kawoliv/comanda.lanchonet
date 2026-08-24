@@ -7,6 +7,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
+from core import servicos
 from core.moeda import ValorInvalido, formatar, para_centavos
 from ui.estilo import CORES
 
@@ -243,13 +244,18 @@ class DialogoProduto(Dialogo):
 
 
 class DialogoFuncionario(Dialogo):
-    """Cadastro e edição de funcionário."""
+    """Cadastro e edição de funcionário.
+
+    Login e senha só aparecem quando o cargo é "Gerente" — são eles que dão
+    acesso ao Modo Gerente (ver DialogoLoginGerente e ui/janela.py).
+    """
 
     CARGOS = ["Atendente", "Caixa", "Cozinha", "Gerente"]
 
     def __init__(self, pai, funcionario=None):
         titulo = "Editar funcionário" if funcionario else "Novo funcionário"
-        super().__init__(pai, titulo, 460, 300)
+        super().__init__(pai, titulo, 480, 560)
+        self.editando = funcionario is not None
 
         ttk.Label(self.corpo, text="Nome", style="Painel.TLabel").pack(anchor="w")
         self.campo_nome = ttk.Entry(self.corpo, font=("TkDefaultFont", 12))
@@ -259,6 +265,21 @@ class DialogoFuncionario(Dialogo):
         self.combo_cargo = ttk.Combobox(self.corpo, values=self.CARGOS,
                                         font=("TkDefaultFont", 12))
         self.combo_cargo.pack(fill="x", pady=(4, 6), ipady=4)
+        self.combo_cargo.bind("<<ComboboxSelected>>", lambda _: self._atualizar_campos_gerente())
+        self.combo_cargo.bind("<KeyRelease>", lambda _: self._atualizar_campos_gerente())
+
+        self.quadro_gerente = ttk.Frame(self.corpo, style="Painel.TFrame")
+
+        ttk.Label(self.quadro_gerente, text="Login de acesso administrativo",
+                  style="Painel.TLabel").pack(anchor="w")
+        self.campo_login = ttk.Entry(self.quadro_gerente, font=("TkDefaultFont", 12))
+        self.campo_login.pack(fill="x", pady=(4, 14), ipady=4)
+
+        texto_senha = "Nova senha (deixe em branco para manter a atual)" if self.editando else "Senha"
+        ttk.Label(self.quadro_gerente, text=texto_senha, style="Painel.TLabel",
+                  wraplength=420).pack(anchor="w")
+        self.campo_senha = ttk.Entry(self.quadro_gerente, font=("TkDefaultFont", 12), show="•")
+        self.campo_senha.pack(fill="x", pady=(4, 6), ipady=4)
 
         self.erro = ttk.Label(self.corpo, text="", style="Suave.TLabel", foreground=CORES["perigo"])
         self.erro.pack(anchor="w", pady=(8, 0))
@@ -266,16 +287,65 @@ class DialogoFuncionario(Dialogo):
         if funcionario:
             self.campo_nome.insert(0, funcionario["nome"])
             self.combo_cargo.set(funcionario["cargo"])
+            if funcionario["login"]:
+                self.campo_login.insert(0, funcionario["login"])
         else:
             self.combo_cargo.set("Atendente")
 
+        self._atualizar_campos_gerente()
         self.rodape("Salvar", self.confirmar)
         self.campo_nome.focus_set()
+
+    def _eh_gerente(self) -> bool:
+        return self.combo_cargo.get().strip().lower() == "gerente"
+
+    def _atualizar_campos_gerente(self):
+        if self._eh_gerente():
+            self.quadro_gerente.pack(fill="x", pady=(0, 6))
+        else:
+            self.quadro_gerente.pack_forget()
 
     def confirmar(self):
         nome = self.campo_nome.get().strip()
         if not nome:
             self.erro.configure(text="Informe o nome do funcionário.")
             return
-        self.resultado = {"nome": nome, "cargo": self.combo_cargo.get().strip() or "Atendente"}
+        self.resultado = {
+            "nome": nome,
+            "cargo": self.combo_cargo.get().strip() or "Atendente",
+            "login": self.campo_login.get() if self._eh_gerente() else "",
+            "senha": self.campo_senha.get() if self._eh_gerente() else "",
+        }
+        self.destroy()
+
+
+class DialogoLoginGerente(Dialogo):
+    """Login/senha para entrar no Modo Gerente (libera ações administrativas)."""
+
+    def __init__(self, pai):
+        super().__init__(pai, "Modo Gerente", 420, 300)
+
+        ttk.Label(self.corpo, text="Login", style="Painel.TLabel").pack(anchor="w")
+        self.campo_login = ttk.Entry(self.corpo, font=("TkDefaultFont", 13))
+        self.campo_login.pack(fill="x", pady=(4, 14), ipady=5)
+
+        ttk.Label(self.corpo, text="Senha", style="Painel.TLabel").pack(anchor="w")
+        self.campo_senha = ttk.Entry(self.corpo, font=("TkDefaultFont", 13), show="•")
+        self.campo_senha.pack(fill="x", pady=(4, 6), ipady=5)
+        self.campo_senha.bind("<Return>", lambda _: self.confirmar())
+
+        self.erro = ttk.Label(self.corpo, text="", style="Suave.TLabel", foreground=CORES["perigo"])
+        self.erro.pack(anchor="w", pady=(8, 0))
+
+        self.rodape("Entrar", self.confirmar, "Primario.TButton")
+        self.campo_login.focus_set()
+
+    def confirmar(self):
+        try:
+            self.resultado = servicos.autenticar_gerente(
+                self.campo_login.get(), self.campo_senha.get()
+            )
+        except servicos.ErroDeNegocio as erro:
+            self.erro.configure(text=str(erro))
+            return
         self.destroy()

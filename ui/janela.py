@@ -7,7 +7,7 @@ from tkinter import messagebox, ttk
 from core import repositorio, servicos
 from core.moeda import formatar
 from ui import estilo
-from ui.componentes import DialogoAbrirCaixa, DialogoOperador
+from ui.componentes import DialogoAbrirCaixa, DialogoLoginGerente, DialogoOperador
 from ui.estilo import CORES
 from ui.tela_equipe import TelaEquipe
 from ui.tela_fechamento import TelaFechamento
@@ -41,6 +41,10 @@ class Aplicacao(tk.Tk):
         # para travar a navegação após o funcionário conferir a contagem da
         # gaveta (ver TelaFechamento).
         self.navegacao_travada = False
+        # Modo Gerente: acesso administrativo (ex.: mexer no Cardápio) fica
+        # liberado só enquanto True — exige login/senha para ligar.
+        self.modo_gerente = False
+        self.gerente_logado = None
 
         self._montar_cabecalho()
         self._montar_corpo()
@@ -87,6 +91,10 @@ class Aplicacao(tk.Tk):
 
         self.botao_operador = ttk.Button(cabecalho, text="Operador", command=self.trocar_operador)
         self.botao_operador.pack(side="right", padx=6, pady=12)
+
+        self.botao_modo_gerente = ttk.Button(cabecalho, text="Modo Gerente",
+                                             command=self.alternar_modo_gerente)
+        self.botao_modo_gerente.pack(side="right", padx=6, pady=12)
 
         self.botao_caixa = ttk.Button(cabecalho, text="Abrir caixa", style="Primario.TButton",
                                       command=self.abrir_caixa)
@@ -168,6 +176,34 @@ class Aplicacao(tk.Tk):
             botao.configure(style="MenuAtivo.TButton" if nome == chave else "Menu.TButton")
 
     # ------------------------------------------------------------------ #
+    # Modo Gerente
+    # ------------------------------------------------------------------ #
+
+    def alternar_modo_gerente(self):
+        if self.modo_gerente:
+            if messagebox.askyesno("Sair do Modo Gerente", "Sair do modo administrativo?"):
+                self._definir_modo_gerente(False)
+            return
+
+        gerente = DialogoLoginGerente(self).aguardar()
+        if gerente:
+            self.gerente_logado = gerente
+            self._definir_modo_gerente(True)
+
+    def _definir_modo_gerente(self, ativo: bool):
+        self.modo_gerente = ativo
+        if not ativo:
+            self.gerente_logado = None
+        self.botao_modo_gerente.configure(
+            text=f"Gerente: {self.gerente_logado['nome']}" if ativo else "Modo Gerente",
+            style="Sucesso.TButton" if ativo else "TButton",
+        )
+        # A tela em exibição pode depender do Modo Gerente (ex.: Cardápio
+        # habilita/desabilita botões de edição) — reconstrói para refletir.
+        if self.tela_atual:
+            self.telas[self.tela_atual].ao_exibir()
+
+    # ------------------------------------------------------------------ #
     # Turno e caixa
     # ------------------------------------------------------------------ #
 
@@ -195,8 +231,9 @@ class Aplicacao(tk.Tk):
         if escolhido:
             self.operador = escolhido
             self.atualizar_cabecalho()
-            if self.tela_atual:
-                self.telas[self.tela_atual].ao_exibir()
+            # Trocar quem está no caixa também sai do Modo Gerente — evita
+            # deixar o acesso administrativo aberto para o próximo operador.
+            self._definir_modo_gerente(False)
 
     def abrir_caixa(self):
         if servicos.caixa_aberto():
