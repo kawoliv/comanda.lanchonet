@@ -37,6 +37,10 @@ class Aplicacao(tk.Tk):
         self.telas = {}
         self.botoes_menu = {}
         self.tela_atual = None
+        # Enquanto True, só a aba "fechamento" pode ficar em exibição — usado
+        # para travar a navegação após o funcionário conferir a contagem da
+        # gaveta (ver TelaFechamento).
+        self.navegacao_travada = False
 
         self._montar_cabecalho()
         self._montar_corpo()
@@ -128,7 +132,26 @@ class Aplicacao(tk.Tk):
     # Navegação
     # ------------------------------------------------------------------ #
 
+    def travar_navegacao(self):
+        """Impede trocar de aba — chamado ao confirmar a contagem da gaveta."""
+        self.navegacao_travada = True
+        for chave, botao in self.botoes_menu.items():
+            if chave != "fechamento":
+                botao.configure(state="disabled")
+
+    def destravar_navegacao(self):
+        self.navegacao_travada = False
+        for botao in self.botoes_menu.values():
+            botao.configure(state="normal")
+
     def mostrar(self, chave: str):
+        if self.navegacao_travada and chave != "fechamento":
+            messagebox.showwarning(
+                "Navegação bloqueada",
+                "Finalize o fechamento do caixa antes de sair desta tela.",
+            )
+            return
+
         if chave not in self.telas:
             classe = dict((c, t) for c, _, t in MENU)[chave]
             self.telas[chave] = classe(self.conteudo, self)

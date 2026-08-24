@@ -44,6 +44,7 @@ class TelaFechamento(ttk.Frame):
             self.caixa_id = None
             self.conferido = False
             self.valor_contado_centavos = None
+            self.app.destravar_navegacao()
             self._montar_caixa_fechado()
         else:
             if self.caixa_id != caixa["id"]:
@@ -51,6 +52,7 @@ class TelaFechamento(ttk.Frame):
                 # depois de fechar) — a contagem anterior não vale mais aqui.
                 self.conferido = False
                 self.valor_contado_centavos = None
+                self.app.destravar_navegacao()
             self.caixa_id = caixa["id"]
             self._montar_caixa_aberto(servicos.resumo_caixa(caixa["id"]))
 
@@ -242,6 +244,7 @@ class TelaFechamento(ttk.Frame):
     def _revelar(self, resumo, contado):
         self.conferido = True
         self.valor_contado_centavos = contado
+        self.app.travar_navegacao()
 
         diferenca = contado - resumo["esperado_gaveta_centavos"]
         if diferenca == 0:
