@@ -46,6 +46,79 @@ class TesteBase(unittest.TestCase):
         }
 
 
+class TesteAuth(unittest.TestCase):
+    def test_verifica_senha_correta(self):
+        from core.auth import gerar_hash_senha, verificar_senha
+        hash_senha = gerar_hash_senha("segredo123")
+        self.assertTrue(verificar_senha("segredo123", hash_senha))
+
+    def test_recusa_senha_incorreta(self):
+        from core.auth import gerar_hash_senha, verificar_senha
+        hash_senha = gerar_hash_senha("segredo123")
+        self.assertFalse(verificar_senha("outra-senha", hash_senha))
+
+    def test_hash_nao_repete_para_mesma_senha(self):
+        """Salt aleatório: duas senhas iguais geram hashes diferentes."""
+        from core.auth import gerar_hash_senha
+        self.assertNotEqual(gerar_hash_senha("segredo123"), gerar_hash_senha("segredo123"))
+
+
+class TesteAcessoAdministrativo(TesteBase):
+    def test_login_padrao_do_gerente_semeado_funciona(self):
+        """db.inicializar() semeia o Gerente inicial com login/senha padrão."""
+        from core import db, servicos
+        gerente = servicos.autenticar_gerente(db.LOGIN_GERENTE_PADRAO, db.SENHA_GERENTE_PADRAO)
+        self.assertEqual(gerente["cargo"], "Gerente")
+
+    def test_autenticacao_recusa_senha_errada(self):
+        from core import db, servicos
+        with self.assertRaises(servicos.ErroDeNegocio):
+            servicos.autenticar_gerente(db.LOGIN_GERENTE_PADRAO, "senha-errada")
+
+    def test_criar_gerente_exige_login_e_senha(self):
+        from core.servicos import ErroDeNegocio, criar_funcionario
+        with self.assertRaises(ErroDeNegocio):
+            criar_funcionario("Novo Gerente", "Gerente")  # sem login nem senha
+
+    def test_criar_funcionario_nao_gerente_ignora_login_e_senha(self):
+        """Login/senha só valem para o cargo Gerente — em outro cargo, são
+        ignorados silenciosamente para não abrir uma porta lateral de acesso."""
+        from core import repositorio, servicos
+
+        funcionario_id = servicos.criar_funcionario(
+            "Atendente Qualquer", "Atendente", login="tentativa", senha="123456"
+        )
+        funcionario = repositorio.buscar_funcionario(funcionario_id)
+        self.assertIsNone(funcionario["login"])
+        self.assertIsNone(funcionario["senha_hash"])
+
+    def test_criar_e_autenticar_novo_gerente(self):
+        from core import servicos
+
+        servicos.criar_funcionario("Segunda Gerente", "Gerente",
+                                   login="segunda.gerente", senha="troque-depois")
+        gerente = servicos.autenticar_gerente("segunda.gerente", "troque-depois")
+        self.assertEqual(gerente["nome"], "Segunda Gerente")
+
+    def test_atualizar_gerente_sem_nova_senha_mantem_a_atual(self):
+        from core import servicos
+
+        funcionario_id = servicos.criar_funcionario(
+            "Gerente Editado", "Gerente", login="editado", senha="senha-original"
+        )
+        servicos.atualizar_funcionario(funcionario_id, "Gerente Editado", "Gerente",
+                                       login="editado", senha="")
+
+        gerente = servicos.autenticar_gerente("editado", "senha-original")
+        self.assertEqual(gerente["id"], funcionario_id)
+
+    def test_editar_para_gerente_sem_senha_e_recusado(self):
+        from core.servicos import ErroDeNegocio, atualizar_funcionario
+
+        with self.assertRaises(ErroDeNegocio):
+            atualizar_funcionario(self.funcionario_id, "Ana", "Gerente", login="ana.gerente")
+
+
 class TesteMoeda(unittest.TestCase):
     def test_converte_formatos_digitados_pelo_usuario(self):
         from core.moeda import para_centavos

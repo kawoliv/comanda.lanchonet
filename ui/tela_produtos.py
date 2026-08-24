@@ -19,8 +19,14 @@ class TelaProdutos(ttk.Frame):
         barra = ttk.Frame(self)
         barra.pack(fill="x", pady=(0, 12))
         ttk.Label(barra, text="Cardápio", style="Titulo.TLabel").pack(side="left")
-        ttk.Button(barra, text="+  Novo produto", style="Primario.TButton",
-                   command=self.novo).pack(side="right")
+        self.botao_novo = ttk.Button(barra, text="+  Novo produto", style="Primario.TButton",
+                                     command=self.novo)
+        self.botao_novo.pack(side="right")
+
+        self.rotulo_bloqueio = ttk.Label(
+            barra, text="🔒 Somente leitura — entre no Modo Gerente para editar o cardápio.",
+            style="SuaveFundo.TLabel", foreground=CORES["aviso"],
+        )
 
         painel = tk.Frame(self, bg=CORES["painel"], highlightbackground=CORES["borda"],
                           highlightthickness=1)
@@ -46,14 +52,30 @@ class TelaProdutos(ttk.Frame):
 
         acoes = ttk.Frame(interno, style="Painel.TFrame")
         acoes.pack(fill="x", pady=(12, 0))
-        ttk.Button(acoes, text="Editar", command=self.editar).pack(side="left", padx=(0, 8))
-        ttk.Button(acoes, text="Remover do cardápio", style="Perigo.TButton",
-                   command=self.desativar).pack(side="left")
+        self.botao_editar = ttk.Button(acoes, text="Editar", command=self.editar)
+        self.botao_editar.pack(side="left", padx=(0, 8))
+        self.botao_remover = ttk.Button(acoes, text="Remover do cardápio", style="Perigo.TButton",
+                                        command=self.desativar)
+        self.botao_remover.pack(side="left")
         ttk.Label(acoes, text="Produtos removidos somem do PDV, mas continuam no histórico.",
                   style="Suave.TLabel").pack(side="right")
 
     def ao_exibir(self):
         self.carregar()
+        self._atualizar_bloqueio()
+
+    def _atualizar_bloqueio(self):
+        """Criar/editar/remover produto (o preço, principalmente) exige Modo
+        Gerente — sem ele a tela fica só para consulta."""
+        liberado = self.app.modo_gerente
+        estado = "normal" if liberado else "disabled"
+        self.botao_novo.configure(state=estado)
+        self.botao_editar.configure(state=estado)
+        self.botao_remover.configure(state=estado)
+        if liberado:
+            self.rotulo_bloqueio.pack_forget()
+        else:
+            self.rotulo_bloqueio.pack(side="right")
 
     def carregar(self):
         self.lista.delete(*self.lista.get_children())
@@ -72,7 +94,18 @@ class TelaProdutos(ttk.Frame):
             return None
         return self.produtos[selecao[0]]
 
+    def _exige_modo_gerente(self) -> bool:
+        if self.app.modo_gerente:
+            return True
+        messagebox.showwarning(
+            "Modo Gerente necessário",
+            "Entre no Modo Gerente (cabeçalho) para alterar o cardápio.",
+        )
+        return False
+
     def novo(self):
+        if not self._exige_modo_gerente():
+            return
         dados = DialogoProduto(self.app, repositorio.categorias()).aguardar()
         if not dados:
             return
@@ -85,6 +118,8 @@ class TelaProdutos(ttk.Frame):
         self.carregar()
 
     def editar(self):
+        if not self._exige_modo_gerente():
+            return
         produto = self._selecionado()
         if produto is None:
             return
@@ -101,6 +136,8 @@ class TelaProdutos(ttk.Frame):
         self.carregar()
 
     def desativar(self):
+        if not self._exige_modo_gerente():
+            return
         produto = self._selecionado()
         if produto is None:
             return

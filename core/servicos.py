@@ -8,14 +8,81 @@ só chama estas funções e mostra o resultado.
 
 from datetime import datetime
 
-from core import repositorio
+from core import auth, repositorio
 from core.moeda import formatar
 
 FORMAS_PAGAMENTO = ["Dinheiro", "PIX", "Cartão de Débito", "Cartão de Crédito", "Vale-Refeição"]
+CARGO_GERENTE = "Gerente"
 
 
 class ErroDeNegocio(Exception):
     """Erro previsto, com mensagem pronta para mostrar ao funcionário."""
+
+
+# --------------------------------------------------------------------------- #
+# Funcionários e acesso administrativo
+# --------------------------------------------------------------------------- #
+#
+# Só o cargo "Gerente" pode ter login/senha e, com isso, entrar no Modo
+# Gerente (ver ui/janela.py). Guardamos essa regra aqui — e não na tela de
+# Equipe — para que ela valha para qualquer chamador futuro.
+
+
+def _eh_gerente(cargo: str) -> bool:
+    return cargo.strip().lower() == CARGO_GERENTE.lower()
+
+
+def criar_funcionario(nome: str, cargo: str = "Atendente",
+                      login: str = "", senha: str = "") -> int:
+    nome = nome.strip()
+    cargo = cargo.strip() or "Atendente"
+    if not nome:
+        raise ErroDeNegocio("Informe o nome do funcionário.")
+
+    login_salvo, hash_salvo = None, None
+    if _eh_gerente(cargo):
+        login = login.strip()
+        if not login:
+            raise ErroDeNegocio("Informe o login do Gerente.")
+        if not senha:
+            raise ErroDeNegocio("Informe a senha do Gerente.")
+        login_salvo, hash_salvo = login, auth.gerar_hash_senha(senha)
+
+    return repositorio.criar_funcionario(nome, cargo, login_salvo, hash_salvo)
+
+
+def atualizar_funcionario(funcionario_id: int, nome: str, cargo: str,
+                          login: str = "", senha: str = "") -> None:
+    nome = nome.strip()
+    cargo = cargo.strip() or "Atendente"
+    if not nome:
+        raise ErroDeNegocio("Informe o nome do funcionário.")
+
+    login_salvo, hash_salvo = None, None
+    if _eh_gerente(cargo):
+        login = login.strip()
+        if not login:
+            raise ErroDeNegocio("Informe o login do Gerente.")
+        if senha:
+            hash_salvo = auth.gerar_hash_senha(senha)
+        else:
+            # Sem senha nova digitada: mantém o hash que já estava salvo.
+            atual = repositorio.buscar_funcionario(funcionario_id)
+            hash_salvo = atual["senha_hash"] if atual else None
+            if not hash_salvo:
+                raise ErroDeNegocio("Informe a senha do Gerente.")
+        login_salvo = login
+
+    repositorio.atualizar_funcionario(funcionario_id, nome, cargo, login_salvo, hash_salvo)
+
+
+def autenticar_gerente(login: str, senha: str) -> dict:
+    login = login.strip()
+    funcionario = repositorio.buscar_funcionario_por_login(login) if login else None
+    if (funcionario is None or not funcionario["ativo"]
+            or not auth.verificar_senha(senha, funcionario["senha_hash"])):
+        raise ErroDeNegocio("Login ou senha inválidos.")
+    return funcionario
 
 
 # --------------------------------------------------------------------------- #

@@ -4,7 +4,7 @@ import sqlite3
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from core import repositorio
+from core import repositorio, servicos
 from ui.componentes import DialogoFuncionario, tabela
 from ui.estilo import CORES
 
@@ -63,15 +63,37 @@ class TelaEquipe(ttk.Frame):
             return None
         return self.funcionarios[selecao[0]]
 
+    @staticmethod
+    def _eh_gerente(cargo: str) -> bool:
+        return cargo.strip().lower() == "gerente"
+
+    def _pode_mexer_em_gerente(self) -> bool:
+        """Só um Gerente já autenticado (Modo Gerente) pode criar, editar ou
+        desativar outro cadastro de Gerente — senão qualquer atendente
+        poderia se autopromover cadastrando seu próprio login e senha."""
+        if self.app.modo_gerente:
+            return True
+        messagebox.showwarning(
+            "Modo Gerente necessário",
+            "Entre no Modo Gerente (cabeçalho) para cadastrar, editar ou "
+            "desativar um funcionário com cargo Gerente.",
+        )
+        return False
+
     def novo(self):
         dados = DialogoFuncionario(self.app).aguardar()
         if not dados:
             return
+        if self._eh_gerente(dados["cargo"]) and not self._pode_mexer_em_gerente():
+            return
         try:
-            repositorio.criar_funcionario(**dados)
+            servicos.criar_funcionario(**dados)
         except sqlite3.IntegrityError:
-            messagebox.showwarning("Nome repetido",
-                                   f'Já existe um funcionário chamado "{dados["nome"]}".')
+            messagebox.showwarning("Repetido",
+                                   f'Já existe um funcionário ou login "{dados["nome"]}" cadastrado.')
+            return
+        except servicos.ErroDeNegocio as erro:
+            messagebox.showwarning("Não foi possível salvar", str(erro))
             return
         self.carregar()
 
@@ -79,15 +101,22 @@ class TelaEquipe(ttk.Frame):
         funcionario = self._selecionado()
         if funcionario is None:
             return
+        if self._eh_gerente(funcionario["cargo"]) and not self._pode_mexer_em_gerente():
+            return
 
         dados = DialogoFuncionario(self.app, funcionario).aguardar()
         if not dados:
             return
+        if self._eh_gerente(dados["cargo"]) and not self._pode_mexer_em_gerente():
+            return
         try:
-            repositorio.atualizar_funcionario(funcionario["id"], **dados)
+            servicos.atualizar_funcionario(funcionario["id"], **dados)
         except sqlite3.IntegrityError:
-            messagebox.showwarning("Nome repetido",
-                                   f'Já existe um funcionário chamado "{dados["nome"]}".')
+            messagebox.showwarning("Repetido",
+                                   f'Já existe um funcionário ou login "{dados["nome"]}" cadastrado.')
+            return
+        except servicos.ErroDeNegocio as erro:
+            messagebox.showwarning("Não foi possível salvar", str(erro))
             return
         self.carregar()
         self.app.atualizar_cabecalho()
@@ -95,6 +124,8 @@ class TelaEquipe(ttk.Frame):
     def desativar(self):
         funcionario = self._selecionado()
         if funcionario is None:
+            return
+        if self._eh_gerente(funcionario["cargo"]) and not self._pode_mexer_em_gerente():
             return
         if len(repositorio.listar_funcionarios()) <= 1:
             messagebox.showwarning("Não é possível",

@@ -30,20 +30,33 @@ def buscar_funcionario(funcionario_id: int):
         ).fetchone()
 
 
-def criar_funcionario(nome: str, cargo: str = "Atendente") -> int:
+def buscar_funcionario_por_login(login: str):
+    with transacao() as con:
+        return con.execute(
+            "SELECT * FROM funcionarios WHERE login = ?", (login,)
+        ).fetchone()
+
+
+def criar_funcionario(nome: str, cargo: str = "Atendente",
+                      login: str = None, senha_hash: str = None) -> int:
     with transacao() as con:
         cursor = con.execute(
-            "INSERT INTO funcionarios (nome, cargo) VALUES (?, ?)",
-            (nome.strip(), cargo.strip() or "Atendente"),
+            "INSERT INTO funcionarios (nome, cargo, login, senha_hash) VALUES (?, ?, ?, ?)",
+            (nome.strip(), cargo.strip() or "Atendente", login, senha_hash),
         )
         return cursor.lastrowid
 
 
-def atualizar_funcionario(funcionario_id: int, nome: str, cargo: str) -> None:
+def atualizar_funcionario(funcionario_id: int, nome: str, cargo: str,
+                          login: str = None, senha_hash: str = None) -> None:
     with transacao() as con:
         con.execute(
-            "UPDATE funcionarios SET nome = ?, cargo = ? WHERE id = ?",
-            (nome.strip(), cargo.strip() or "Atendente", funcionario_id),
+            """
+            UPDATE funcionarios
+               SET nome = ?, cargo = ?, login = ?, senha_hash = ?
+             WHERE id = ?
+            """,
+            (nome.strip(), cargo.strip() or "Atendente", login, senha_hash, funcionario_id),
         )
 
 

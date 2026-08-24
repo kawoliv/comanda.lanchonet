@@ -12,6 +12,8 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from core import auth
+
 # Empacotado com PyInstaller (--onefile), __file__ aponta para a pasta
 # temporária de extração (_MEIPASS), que é apagada a cada execução. Nesse
 # caso usamos a pasta do .exe para que dados/ e relatorios/ persistam.
@@ -61,12 +63,19 @@ def transacao():
 
 ESQUEMA = """
 CREATE TABLE IF NOT EXISTS funcionarios (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome      TEXT    NOT NULL UNIQUE,
-    cargo     TEXT    NOT NULL DEFAULT 'Atendente',
-    ativo     INTEGER NOT NULL DEFAULT 1,
-    criado_em TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome       TEXT    NOT NULL UNIQUE,
+    cargo      TEXT    NOT NULL DEFAULT 'Atendente',
+    login      TEXT,                      -- só preenchido para o cargo Gerente
+    senha_hash TEXT,                      -- PBKDF2, ver core/auth.py
+    ativo      INTEGER NOT NULL DEFAULT 1,
+    criado_em  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- Login não pode repetir entre funcionários, mas vários podem não ter login
+-- (índice parcial ignora as linhas com login NULL).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_funcionarios_login
+    ON funcionarios (login) WHERE login IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS produtos (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,8 +137,13 @@ CREATE TABLE IF NOT EXISTS itens_venda (
 CREATE INDEX IF NOT EXISTS idx_itens_venda ON itens_venda (venda_id);
 """
 
+# Credencial do Gerente semeada na primeira execução — troque a senha depois
+# em Equipe > Editar (é o único jeito de entrar no Modo Gerente pela primeira vez).
+LOGIN_GERENTE_PADRAO = "gerente"
+SENHA_GERENTE_PADRAO = "gerente123"
+
 FUNCIONARIOS_INICIAIS = [
-    ("Gerente", "Gerente"),
+    ("Gerente", "Gerente", LOGIN_GERENTE_PADRAO, SENHA_GERENTE_PADRAO),
 ]
 
 PRODUTOS_INICIAIS = [
@@ -148,17 +162,71 @@ PRODUTOS_INICIAIS = [
 ]
 
 
+def _migrar_esquema(con: sqlite3.Connection) -> None:
+    """Adiciona colunas novas a bancos criados por versões anteriores.
+
+    `CREATE TABLE IF NOT EXISTS` não altera uma tabela já existente, então
+    quem já tinha `dados/caixa.db` antes do login do Gerente precisa deste
+    passo para ganhar as colunas `login`/`senha_hash`.
+    """
+    tabela_existe = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'funcionarios'"
+    ).fetchone()
+    if not tabela_existe:
+        return
+
+    colunas = {linha["name"] for linha in con.execute("PRAGMA table_info(funcionarios)")}
+    if "login" not in colunas:
+        con.execute("ALTER TABLE funcionarios ADD COLUMN login TEXT")
+    if "senha_hash" not in colunas:
+        con.execute("ALTER TABLE funcionarios ADD COLUMN senha_hash TEXT")
+
+    # Sempre confere (não só quando as colunas acabaram de ser criadas): um
+    # banco já migrado antes desta credencial padrão existir também precisa
+    # ganhá-la — senão fica sem nenhum jeito de entrar no Modo Gerente.
+    _semear_login_gerente_existente(con)
+
+
+def _semear_login_gerente_existente(con: sqlite3.Connection) -> None:
+    """Dá a credencial padrão ao Gerente já cadastrado num banco antigo.
+
+    Sem isso, quem já usava o sistema antes do login existir ficaria com um
+    funcionário de cargo Gerente mas sem login/senha — ninguém conseguiria
+    entrar no Modo Gerente pela primeira vez.
+    """
+    ja_tem_login = con.execute(
+        "SELECT 1 FROM funcionarios WHERE login IS NOT NULL"
+    ).fetchone()
+    if ja_tem_login:
+        return
+
+    gerente = con.execute(
+        "SELECT id FROM funcionarios WHERE cargo = 'Gerente' ORDER BY ativo DESC, id ASC LIMIT 1"
+    ).fetchone()
+    if gerente is None:
+        return
+
+    con.execute(
+        "UPDATE funcionarios SET login = ?, senha_hash = ? WHERE id = ?",
+        (LOGIN_GERENTE_PADRAO, auth.gerar_hash_senha(SENHA_GERENTE_PADRAO), gerente["id"]),
+    )
+
+
 def inicializar() -> None:
     """Cria as tabelas (se ainda não existirem) e popula o cadastro básico."""
     PASTA_RELATORIOS.mkdir(parents=True, exist_ok=True)
 
     with transacao() as con:
+        _migrar_esquema(con)
         con.executescript(ESQUEMA)
 
         if con.execute("SELECT COUNT(*) FROM funcionarios").fetchone()[0] == 0:
             con.executemany(
-                "INSERT INTO funcionarios (nome, cargo) VALUES (?, ?)",
-                FUNCIONARIOS_INICIAIS,
+                "INSERT INTO funcionarios (nome, cargo, login, senha_hash) VALUES (?, ?, ?, ?)",
+                [
+                    (nome, cargo, login, auth.gerar_hash_senha(senha))
+                    for nome, cargo, login, senha in FUNCIONARIOS_INICIAIS
+                ],
             )
 
         if con.execute("SELECT COUNT(*) FROM produtos").fetchone()[0] == 0:
