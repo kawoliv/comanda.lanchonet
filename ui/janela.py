@@ -71,7 +71,7 @@ class Aplicacao(tk.Tk):
                 pass
 
     def _montar_cabecalho(self):
-        cabecalho = tk.Frame(self, bg=CORES["menu"], height=64)
+        cabecalho = tk.Frame(self, bg=CORES["menu"], height=76)
         cabecalho.pack(fill="x")
         cabecalho.pack_propagate(False)
 
@@ -90,15 +90,15 @@ class Aplicacao(tk.Tk):
         self.rotulo_relogio.pack(side="right", padx=(8, 16))
 
         self.botao_operador = ttk.Button(cabecalho, text="Operador", command=self.trocar_operador)
-        self.botao_operador.pack(side="right", padx=6, pady=12)
+        self.botao_operador.pack(side="right", padx=8, pady=12)
 
         self.botao_modo_gerente = ttk.Button(cabecalho, text="Modo Gerente",
                                              command=self.alternar_modo_gerente)
-        self.botao_modo_gerente.pack(side="right", padx=6, pady=12)
+        self.botao_modo_gerente.pack(side="right", padx=8, pady=12)
 
         self.botao_caixa = ttk.Button(cabecalho, text="Abrir caixa", style="Primario.TButton",
                                       command=self.abrir_caixa)
-        self.botao_caixa.pack(side="right", padx=6, pady=12)
+        self.botao_caixa.pack(side="right", padx=10, pady=12)
 
         self.rotulo_total_dia = tk.Label(cabecalho, text="", bg=CORES["menu"], fg="#9FE0AE",
                                          font=(self.fontes["padrao"][0], 12, "bold"),
