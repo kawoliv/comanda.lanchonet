@@ -38,7 +38,10 @@ cardápio inicial de exemplo e o funcionário "Gerente".
 
 1. **Abrir caixa** — o funcionário informa quem está abrindo e o troco inicial da gaveta.
 2. **Vender** — busca o produto digitando, `Enter` joga na comanda, `F2` finaliza.
-   Cada venda grava horário, vendedor, forma de pagamento e todos os itens.
+   Cada venda grava horário, vendedor, forma de pagamento e todos os itens. Se o
+   cliente quiser pagar parte em dinheiro e parte em outra forma, o botão
+   "Dividir pagamento" (ao lado de "Limpar") deixa escolher as duas formas e o
+   valor de cada uma — a soma precisa bater exatamente com o total da venda.
 3. **Fechar caixa** — o sistema mostra o total vendido, quanto deveria ter na gaveta,
    e o funcionário informa quanto contou. A diferença fica registrada.
 4. **Planilha** — no fechamento é gerado um `.xlsx` em `relatorios/`.
@@ -58,6 +61,15 @@ tela de Cardápio fica só para consulta (atendente não muda preço).
   senão um atendente poderia se autopromover.
 - **Credencial semeada na primeira execução:** login `gerente`, senha `gerente123`
   (ver `core/db.py`). Troque a senha em **Equipe → Editar** assim que possível.
+
+### Divisão de pagamento entre duas formas
+
+Uma venda pode ser paga em até **duas formas diferentes** (ex.: parte em dinheiro,
+parte no cartão). Isso aparece em todo lugar como `"Dinheiro/Cartão de Débito"` —
+no PDV, no histórico e na planilha. Na conferência da gaveta e no resumo "Por
+forma de pagamento", cada forma entra separada com o valor certo (não o texto
+combinado), porque é isso que faz o cálculo do que deveria estar na gaveta
+continuar correto mesmo com venda dividida.
 
 ### Atalhos de teclado
 
@@ -123,16 +135,17 @@ Por isso dá para testar todas as regras sem abrir janela nenhuma.
 
 ```
 funcionarios ──┬─< caixas >─┬── vendas ──< itens_venda >── produtos
-               └────────────┘
+               └────────────┘         └─< pagamentos_venda
 ```
 
 | Tabela | Guarda |
 |---|---|
-| `funcionarios` | quem vende e quem abre/fecha o caixa |
+| `funcionarios` | quem vende e quem abre/fecha o caixa (login/senha só para o Gerente) |
 | `produtos` | cardápio com preço em centavos |
 | `caixas` | abertura, fechamento, valores conferidos e caminho da planilha |
-| `vendas` | horário, vendedor, forma de pagamento, total, flag de cancelamento |
+| `vendas` | horário, vendedor, forma de pagamento (texto combinado), total, flag de cancelamento |
 | `itens_venda` | produto, quantidade, preço unitário e subtotal de cada item |
+| `pagamentos_venda` | forma de pagamento e valor de cada parte da venda (1 linha se for forma única, 2 se for dividida) |
 
 ---
 
@@ -164,6 +177,13 @@ Se a gravação de um item falhar, a venda inteira é revertida — nunca fica v
 O esperado na gaveta é `troco inicial + vendas em dinheiro`. Cartão, PIX e vale
 entram no faturamento mas não na gaveta, então não contaminam a conferência.
 
+**Composição de pagamento em tabela própria, não em texto.**
+`vendas.forma_pagamento` guarda um texto combinado (`"Dinheiro/PIX"`) só pra
+exibição. Quem alimenta a conferência de gaveta e o resumo por forma de
+pagamento é `pagamentos_venda`, que guarda o valor exato de cada forma —
+um texto concatenado não seria suficiente pra saber quanto exatamente entrou
+em dinheiro numa venda dividida.
+
 ---
 
 ## Testes
@@ -175,7 +195,8 @@ python -m unittest discover testes
 Cobrem conversão e formatação de valores, bloqueio de caixa duplicado, recusa de
 venda com caixa fechado, cálculo da diferença de gaveta, cancelamento de venda,
 congelamento de preço no histórico, geração da planilha, consulta ao histórico,
-hash/verificação de senha e as regras de login do Gerente.
+hash/verificação de senha, as regras de login do Gerente e a divisão de
+pagamento entre duas formas (incluindo o efeito na conferência de gaveta).
 
 ---
 

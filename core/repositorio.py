@@ -234,12 +234,23 @@ def listar_caixas(data_inicio: str = "", data_fim: str = "", apenas_fechados: bo
 # --------------------------------------------------------------------------- #
 
 
-def inserir_venda(caixa_id, funcionario_id, data_hora, forma_pagamento, total_centavos, itens) -> int:
+def inserir_venda(caixa_id, funcionario_id, data_hora, forma_pagamento, total_centavos, itens,
+                  pagamentos: list = None) -> int:
     """
-    Grava a venda e seus itens na MESMA transação.
+    Grava a venda, seus itens e a composição de pagamento na MESMA transação.
 
     Se algum item falhar, nada é gravado — não fica venda sem item no banco.
+
+    `pagamentos` é opcional: sem ele, assume que `forma_pagamento` cobriu o
+    total inteiro (venda de forma única). Para dividir entre duas formas
+    diferentes, passe algo como
+        [{"forma_pagamento": "Dinheiro", "valor_centavos": 2000},
+         {"forma_pagamento": "PIX", "valor_centavos": 1600}]
+    — é o `core.servicos.registrar_venda` quem valida e monta essa lista.
     """
+    if pagamentos is None:
+        pagamentos = [{"forma_pagamento": forma_pagamento, "valor_centavos": total_centavos}]
+
     with transacao() as con:
         cursor = con.execute(
             """
@@ -268,6 +279,14 @@ def inserir_venda(caixa_id, funcionario_id, data_hora, forma_pagamento, total_ce
                     int(item["quantidade"]) * int(item["preco_unit_centavos"]),
                 )
                 for item in itens
+            ],
+        )
+
+        con.executemany(
+            "INSERT INTO pagamentos_venda (venda_id, forma_pagamento, valor_centavos) VALUES (?, ?, ?)",
+            [
+                (venda_id, pagamento["forma_pagamento"], int(pagamento["valor_centavos"]))
+                for pagamento in pagamentos
             ],
         )
         return venda_id
@@ -387,16 +406,30 @@ def resumo_por_funcionario(caixa_id: int) -> list:
 
 
 def resumo_por_pagamento(caixa_id: int) -> list:
+    """
+    Soma por forma de pagamento a partir de `pagamentos_venda`, não do texto
+    combinado em `vendas.forma_pagamento` — assim uma venda dividida entre
+    Dinheiro e PIX entra com o valor certo em cada forma (essencial pro
+    cálculo do que deveria estar na gaveta).
+    """
     with transacao() as con:
         return con.execute(
             """
-            SELECT forma_pagamento,
+            SELECT p.forma_pagamento,
                    COUNT(*)                            AS qtd_vendas,
-                   COALESCE(SUM(total_centavos), 0)    AS total_centavos
-              FROM vendas
-             WHERE caixa_id = ? AND cancelada = 0
-          GROUP BY forma_pagamento
+                   COALESCE(SUM(p.valor_centavos), 0)  AS total_centavos
+              FROM pagamentos_venda p
+              JOIN vendas v ON v.id = p.venda_id
+             WHERE v.caixa_id = ? AND v.cancelada = 0
+          GROUP BY p.forma_pagamento
           ORDER BY total_centavos DESC
             """,
             (caixa_id,),
+        ).fetchall()
+
+
+def pagamentos_da_venda(venda_id: int) -> list:
+    with transacao() as con:
+        return con.execute(
+            "SELECT * FROM pagamentos_venda WHERE venda_id = ? ORDER BY id", (venda_id,)
         ).fetchall()

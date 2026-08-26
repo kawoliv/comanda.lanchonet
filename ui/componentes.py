@@ -349,3 +349,89 @@ class DialogoLoginGerente(Dialogo):
             self.erro.configure(text=str(erro))
             return
         self.destroy()
+
+
+class DialogoPagamentoMultiplo(Dialogo):
+    """Divide o total da venda entre duas formas de pagamento diferentes.
+
+    A validação de verdade (formas diferentes, valores positivos, soma
+    batendo com o total) mora em `core.servicos.registrar_venda` — aqui é só
+    uma conferência rápida pra não obrigar o funcionário a ir até o fim do
+    fluxo pra descobrir que errou uma conta.
+    """
+
+    def __init__(self, pai, total_centavos: int):
+        super().__init__(pai, "Dividir pagamento", 460, 480)
+        self.total_centavos = total_centavos
+
+        ttk.Label(self.corpo, text=f"Total da venda: {formatar(total_centavos)}",
+                  style="Painel.TLabel", font=("TkDefaultFont", 13, "bold")).pack(anchor="w", pady=(0, 16))
+
+        ttk.Label(self.corpo, text="1ª forma de pagamento", style="Painel.TLabel").pack(anchor="w")
+        self.combo_forma1 = ttk.Combobox(self.corpo, state="readonly",
+                                         values=servicos.FORMAS_PAGAMENTO, font=("TkDefaultFont", 12))
+        self.combo_forma1.current(0)
+        self.combo_forma1.pack(fill="x", pady=(4, 10), ipady=4)
+
+        ttk.Label(self.corpo, text="Valor pago nessa forma (R$)", style="Painel.TLabel").pack(anchor="w")
+        self.campo_valor1 = ttk.Entry(self.corpo, font=("TkDefaultFont", 13))
+        self.campo_valor1.pack(fill="x", pady=(4, 18), ipady=5)
+        self.campo_valor1.bind("<KeyRelease>", lambda _: self._preencher_restante())
+
+        ttk.Label(self.corpo, text="2ª forma de pagamento", style="Painel.TLabel").pack(anchor="w")
+        self.combo_forma2 = ttk.Combobox(self.corpo, state="readonly",
+                                         values=servicos.FORMAS_PAGAMENTO, font=("TkDefaultFont", 12))
+        indice_padrao_2 = 1 if len(servicos.FORMAS_PAGAMENTO) > 1 else 0
+        self.combo_forma2.current(indice_padrao_2)
+        self.combo_forma2.pack(fill="x", pady=(4, 10), ipady=4)
+
+        ttk.Label(self.corpo, text="Valor pago nessa forma (R$)", style="Painel.TLabel").pack(anchor="w")
+        self.campo_valor2 = ttk.Entry(self.corpo, font=("TkDefaultFont", 13))
+        self.campo_valor2.pack(fill="x", pady=(4, 6), ipady=5)
+
+        self.erro = ttk.Label(self.corpo, text="", style="Suave.TLabel", foreground=CORES["perigo"],
+                              wraplength=400)
+        self.erro.pack(anchor="w", pady=(10, 0))
+
+        self.rodape("Confirmar divisão", self.confirmar, "Sucesso.TButton")
+        self.campo_valor1.focus_set()
+
+    def _preencher_restante(self):
+        """Atalho: preenche o 2º valor com o que falta pro total. O
+        funcionário pode digitar por cima se quiser outra divisão."""
+        try:
+            valor1 = para_centavos(self.campo_valor1.get())
+        except ValorInvalido:
+            return
+        restante = self.total_centavos - valor1
+        if restante > 0:
+            self.campo_valor2.delete(0, "end")
+            self.campo_valor2.insert(0, formatar(restante).replace("R$ ", ""))
+
+    def confirmar(self):
+        forma1 = self.combo_forma1.get()
+        forma2 = self.combo_forma2.get()
+        if forma1 == forma2:
+            self.erro.configure(text="Escolha duas formas de pagamento diferentes.")
+            return
+        try:
+            valor1 = para_centavos(self.campo_valor1.get())
+            valor2 = para_centavos(self.campo_valor2.get())
+        except ValorInvalido as erro:
+            self.erro.configure(text=str(erro))
+            return
+        if valor1 <= 0 or valor2 <= 0:
+            self.erro.configure(text="Os dois valores devem ser maiores que zero.")
+            return
+        if valor1 + valor2 != self.total_centavos:
+            self.erro.configure(
+                text=f"A soma ({formatar(valor1 + valor2)}) não bate com o total da venda "
+                     f"({formatar(self.total_centavos)})."
+            )
+            return
+
+        self.resultado = [
+            {"forma_pagamento": forma1, "valor_centavos": valor1},
+            {"forma_pagamento": forma2, "valor_centavos": valor2},
+        ]
+        self.destroy()
