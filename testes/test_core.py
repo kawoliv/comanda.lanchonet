@@ -238,6 +238,87 @@ class TesteVendas(TesteBase):
         self.assertEqual(resumo_caixa(caixa_id)["total_centavos"], 1800)
 
 
+class TesteVendaDividida(TesteBase):
+    """Cliente pagando parte em dinheiro, parte em outra forma."""
+
+    def _pagamentos(self, valor1=2000, valor2=1600, forma1="Dinheiro", forma2="PIX"):
+        return [
+            {"forma_pagamento": forma1, "valor_centavos": valor1},
+            {"forma_pagamento": forma2, "valor_centavos": valor2},
+        ]
+
+    def test_forma_de_pagamento_combina_as_duas_formas(self):
+        from core.servicos import abrir_caixa, registrar_venda
+
+        caixa_id = abrir_caixa(self.funcionario_id, 0)
+        venda = registrar_venda(self.funcionario_id, [self.item(2)],
+                                pagamentos=self._pagamentos())  # total 3600 = 2000 + 1600
+
+        self.assertEqual(venda["total_centavos"], 3600)
+        registrada = next(v for v in self.repositorio.listar_vendas(caixa_id)
+                          if v["id"] == venda["venda_id"])
+        self.assertEqual(registrada["forma_pagamento"], "Dinheiro/PIX")
+
+    def test_grava_uma_linha_por_forma_em_pagamentos_venda(self):
+        from core.servicos import abrir_caixa, registrar_venda
+
+        abrir_caixa(self.funcionario_id, 0)
+        venda = registrar_venda(self.funcionario_id, [self.item(2)],
+                                pagamentos=self._pagamentos())
+
+        pagamentos = self.repositorio.pagamentos_da_venda(venda["venda_id"])
+        self.assertEqual(len(pagamentos), 2)
+        self.assertEqual({p["forma_pagamento"] for p in pagamentos}, {"Dinheiro", "PIX"})
+        self.assertEqual(sum(p["valor_centavos"] for p in pagamentos), 3600)
+
+    def test_soma_incorreta_e_recusada(self):
+        from core.servicos import ErroDeNegocio, abrir_caixa, registrar_venda
+
+        abrir_caixa(self.funcionario_id, 0)
+        with self.assertRaises(ErroDeNegocio):
+            registrar_venda(self.funcionario_id, [self.item(2)],  # total 3600
+                            pagamentos=self._pagamentos(valor1=2000, valor2=1000))  # soma 3000
+
+    def test_exige_duas_formas_diferentes(self):
+        from core.servicos import ErroDeNegocio, abrir_caixa, registrar_venda
+
+        abrir_caixa(self.funcionario_id, 0)
+        with self.assertRaises(ErroDeNegocio):
+            registrar_venda(self.funcionario_id, [self.item(2)],
+                            pagamentos=self._pagamentos(forma1="Dinheiro", forma2="Dinheiro"))
+
+    def test_exige_valores_positivos(self):
+        from core.servicos import ErroDeNegocio, abrir_caixa, registrar_venda
+
+        abrir_caixa(self.funcionario_id, 0)
+        with self.assertRaises(ErroDeNegocio):
+            registrar_venda(self.funcionario_id, [self.item(2)],
+                            pagamentos=self._pagamentos(valor1=3600, valor2=0))
+
+    def test_aceita_exatamente_duas_formas(self):
+        from core.servicos import ErroDeNegocio, abrir_caixa, registrar_venda
+
+        abrir_caixa(self.funcionario_id, 0)
+        with self.assertRaises(ErroDeNegocio):
+            registrar_venda(self.funcionario_id, [self.item(2)],
+                            pagamentos=[{"forma_pagamento": "Dinheiro", "valor_centavos": 3600}])
+
+    def test_gaveta_recebe_so_a_parte_em_dinheiro(self):
+        """A conferência de gaveta não pode contar o valor pago em PIX."""
+        from core.servicos import abrir_caixa, fechar_caixa, registrar_venda
+
+        caixa_id = abrir_caixa(self.funcionario_id, 0)
+        registrar_venda(self.funcionario_id, [self.item(2)],
+                        pagamentos=self._pagamentos(valor1=2000, valor2=1600))
+
+        resumo, _ = fechar_caixa(caixa_id, self.funcionario_id,
+                                 valor_contado_centavos=2000, gerar_planilha=False)
+
+        self.assertEqual(resumo["total_dinheiro_centavos"], 2000)
+        self.assertEqual(resumo["esperado_gaveta_centavos"], 2000)
+        self.assertEqual(resumo["caixa"]["diferenca_centavos"], 0)
+
+
 class TestePlanilha(TesteBase):
     def test_gera_arquivo_com_as_quatro_abas(self):
         from openpyxl import load_workbook

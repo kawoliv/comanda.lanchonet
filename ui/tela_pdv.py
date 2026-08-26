@@ -11,7 +11,7 @@ from tkinter import messagebox, ttk
 
 from core import repositorio, servicos
 from core.moeda import ValorInvalido, formatar, para_centavos
-from ui.componentes import Dialogo, tabela
+from ui.componentes import Dialogo, DialogoPagamentoMultiplo, tabela
 from ui.estilo import CORES
 
 
@@ -21,6 +21,7 @@ class TelaPDV(ttk.Frame):
         self.app = app
         self.comanda = []        # itens da venda em andamento
         self.produtos = {}       # iid da tabela -> linha do banco
+        self.pagamento_dividido = None  # None ou [{"forma_pagamento", "valor_centavos"}, ...]
 
         self._montar_cabecalho()
         self._montar_conteudo()
@@ -119,6 +120,8 @@ class TelaPDV(ttk.Frame):
                                ("Remover", self.remover_item),
                                ("Limpar", self.limpar_comanda)):
             ttk.Button(acoes, text=texto, command=comando).pack(side="left", padx=(0, 6))
+        ttk.Button(acoes, text="Dividir pagamento",
+                   command=self.abrir_pagamento_dividido).pack(side="left", padx=(0, 6))
 
         ttk.Separator(interno).pack(fill="x", pady=8)
 
@@ -153,6 +156,11 @@ class TelaPDV(ttk.Frame):
         self.campo_recebido = ttk.Entry(formulario, font=("TkDefaultFont", 11))
         self.campo_recebido.grid(row=2, column=1, sticky="ew", pady=2, ipady=2)
         self.campo_recebido.bind("<KeyRelease>", lambda _: self._atualizar_troco())
+
+        self.rotulo_pagamento_dividido = ttk.Label(interno, text="", style="Painel.TLabel",
+                                                    font=("TkDefaultFont", 10, "bold"),
+                                                    foreground=CORES["sucesso"], wraplength=280)
+        self.rotulo_pagamento_dividido.pack(anchor="w", pady=(4, 0))
 
         self.rotulo_troco = ttk.Label(interno, text="", style="Painel.TLabel",
                                       font=("TkDefaultFont", 12, "bold"),
@@ -336,6 +344,11 @@ class TelaPDV(ttk.Frame):
             self._atualizar_comanda()
 
     def _atualizar_comanda(self):
+        # Qualquer mudança na comanda invalida uma divisão de pagamento já
+        # feita — a soma antiga não bate mais com o novo total.
+        self.pagamento_dividido = None
+        self._atualizar_estado_pagamento_dividido()
+
         self.lista_comanda.delete(*self.lista_comanda.get_children())
         for item in self.comanda:
             subtotal = item["quantidade"] * item["preco_unit_centavos"]
@@ -349,7 +362,36 @@ class TelaPDV(ttk.Frame):
     def _total(self) -> int:
         return sum(i["quantidade"] * i["preco_unit_centavos"] for i in self.comanda)
 
+    def abrir_pagamento_dividido(self):
+        total = self._total()
+        if total <= 0:
+            messagebox.showinfo("Comanda vazia", "Adicione produtos antes de dividir o pagamento.")
+            return
+        resultado = DialogoPagamentoMultiplo(self.app, total).aguardar()
+        if resultado:
+            self.pagamento_dividido = resultado
+            self._atualizar_estado_pagamento_dividido()
+
+    def _atualizar_estado_pagamento_dividido(self):
+        """Com pagamento dividido, a forma única e o campo de troco não fazem
+        mais sentido — ficam desabilitados e o resumo da divisão aparece no lugar."""
+        if self.pagamento_dividido:
+            texto = " + ".join(
+                f"{p['forma_pagamento']} {formatar(p['valor_centavos'])}"
+                for p in self.pagamento_dividido
+            )
+            self.rotulo_pagamento_dividido.configure(text=f"Pagamento dividido: {texto}")
+            self.combo_pagamento.configure(state="disabled")
+            self.campo_recebido.configure(state="disabled")
+            self.rotulo_troco.configure(text="")
+        else:
+            self.rotulo_pagamento_dividido.configure(text="")
+            self.combo_pagamento.configure(state="readonly")
+            self.campo_recebido.configure(state="normal")
+
     def _atualizar_troco(self):
+        if self.pagamento_dividido:
+            return
         if self.combo_pagamento.get() != "Dinheiro" or not self.campo_recebido.get().strip():
             self.rotulo_troco.configure(text="")
             return
@@ -382,11 +424,18 @@ class TelaPDV(ttk.Frame):
         vendedor = self.vendedores[self.combo_vendedor.current()]
 
         try:
-            venda = servicos.registrar_venda(
-                funcionario_id=vendedor["id"],
-                itens=self.comanda,
-                forma_pagamento=self.combo_pagamento.get(),
-            )
+            if self.pagamento_dividido:
+                venda = servicos.registrar_venda(
+                    funcionario_id=vendedor["id"],
+                    itens=self.comanda,
+                    pagamentos=self.pagamento_dividido,
+                )
+            else:
+                venda = servicos.registrar_venda(
+                    funcionario_id=vendedor["id"],
+                    itens=self.comanda,
+                    forma_pagamento=self.combo_pagamento.get(),
+                )
         except servicos.ErroDeNegocio as erro:
             messagebox.showwarning("Não foi possível registrar", str(erro))
             return

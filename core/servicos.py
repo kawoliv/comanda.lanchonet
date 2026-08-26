@@ -157,21 +157,59 @@ def fechar_caixa(
 # --------------------------------------------------------------------------- #
 
 
-def registrar_venda(funcionario_id: int, itens: list, forma_pagamento: str = "Dinheiro") -> dict:
+def _normalizar_pagamentos(forma_pagamento: str, pagamentos: list, total_centavos: int) -> list:
+    """Valida e devolve a composição canônica de pagamento de uma venda.
+
+    Sem `pagamentos`, é uma venda de forma única (`forma_pagamento` cobre o
+    total inteiro). Com `pagamentos`, o cliente dividiu entre duas formas
+    diferentes — a soma tem que bater exatamente com o total da venda.
+    """
+    if not pagamentos:
+        if forma_pagamento not in FORMAS_PAGAMENTO:
+            raise ErroDeNegocio(f"Forma de pagamento inválida: {forma_pagamento}")
+        return [{"forma_pagamento": forma_pagamento, "valor_centavos": total_centavos}]
+
+    if len(pagamentos) != 2:
+        raise ErroDeNegocio("A divisão de pagamento aceita exatamente duas formas.")
+
+    formas = [pagamento["forma_pagamento"] for pagamento in pagamentos]
+    if formas[0] == formas[1]:
+        raise ErroDeNegocio("Escolha duas formas de pagamento diferentes.")
+    for forma in formas:
+        if forma not in FORMAS_PAGAMENTO:
+            raise ErroDeNegocio(f"Forma de pagamento inválida: {forma}")
+
+    valores = [int(pagamento["valor_centavos"]) for pagamento in pagamentos]
+    if any(valor <= 0 for valor in valores):
+        raise ErroDeNegocio("Os valores da divisão de pagamento devem ser maiores que zero.")
+    if sum(valores) != total_centavos:
+        raise ErroDeNegocio("A soma dos pagamentos não bate com o total da venda.")
+
+    return [{"forma_pagamento": forma, "valor_centavos": valor}
+            for forma, valor in zip(formas, valores)]
+
+
+def registrar_venda(funcionario_id: int, itens: list, forma_pagamento: str = "Dinheiro",
+                    pagamentos: list = None) -> dict:
     """
     Registra uma venda no caixa que estiver aberto.
 
     `itens` é uma lista de dicionários:
         {"produto_id": 1, "nome": "X-Burger", "categoria": "Lanches",
          "quantidade": 2, "preco_unit_centavos": 1800}
+
+    Por padrão a venda é paga numa forma só (`forma_pagamento`). Para dividir
+    entre duas formas diferentes, passe `pagamentos`:
+        [{"forma_pagamento": "Dinheiro", "valor_centavos": 2000},
+         {"forma_pagamento": "PIX", "valor_centavos": 1600}]
+    Nesse caso `forma_pagamento` é ignorado — o texto salvo na venda vira as
+    formas combinadas na ordem informada (ex.: "Dinheiro/PIX").
     """
     caixa = repositorio.caixa_aberto()
     if caixa is None:
         raise ErroDeNegocio("Nenhum caixa aberto. Abra o caixa para registrar vendas.")
     if not itens:
         raise ErroDeNegocio("Adicione pelo menos um produto antes de finalizar a venda.")
-    if forma_pagamento not in FORMAS_PAGAMENTO:
-        raise ErroDeNegocio(f"Forma de pagamento inválida: {forma_pagamento}")
 
     for item in itens:
         if int(item["quantidade"]) <= 0:
@@ -180,15 +218,19 @@ def registrar_venda(funcionario_id: int, itens: list, forma_pagamento: str = "Di
             raise ErroDeNegocio(f'Preço inválido para "{item["nome"]}".')
 
     total = sum(int(i["quantidade"]) * int(i["preco_unit_centavos"]) for i in itens)
+    pagamentos_normalizados = _normalizar_pagamentos(forma_pagamento, pagamentos, total)
+    forma_pagamento_exibicao = "/".join(p["forma_pagamento"] for p in pagamentos_normalizados)
+
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     venda_id = repositorio.inserir_venda(
         caixa_id=caixa["id"],
         funcionario_id=funcionario_id,
         data_hora=agora,
-        forma_pagamento=forma_pagamento,
+        forma_pagamento=forma_pagamento_exibicao,
         total_centavos=total,
         itens=itens,
+        pagamentos=pagamentos_normalizados,
     )
 
     return {"venda_id": venda_id, "total_centavos": total, "data_hora": agora}

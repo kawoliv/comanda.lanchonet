@@ -135,6 +135,20 @@ CREATE TABLE IF NOT EXISTS itens_venda (
 );
 
 CREATE INDEX IF NOT EXISTS idx_itens_venda ON itens_venda (venda_id);
+
+-- Composição de pagamento de cada venda. Normalmente uma linha só (a forma
+-- inteira cobrindo o total); quando o cliente divide entre duas formas
+-- diferentes, são duas linhas. É esta tabela — não o texto em
+-- vendas.forma_pagamento — que soma quanto entrou em dinheiro de fato, o que
+-- importa pra conferência da gaveta.
+CREATE TABLE IF NOT EXISTS pagamentos_venda (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    venda_id        INTEGER NOT NULL REFERENCES vendas(id) ON DELETE CASCADE,
+    forma_pagamento TEXT    NOT NULL,
+    valor_centavos  INTEGER NOT NULL CHECK (valor_centavos > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pagamentos_venda ON pagamentos_venda (venda_id);
 """
 
 # Credencial do Gerente semeada na primeira execução — troque a senha depois
@@ -212,6 +226,29 @@ def _semear_login_gerente_existente(con: sqlite3.Connection) -> None:
     )
 
 
+def _semear_pagamentos_venda_existentes(con: sqlite3.Connection) -> None:
+    """Cria a linha de pagamento das vendas gravadas antes desta tabela existir.
+
+    Sem isso, vendas antigas ficariam de fora do cálculo de dinheiro em
+    gaveta (que agora soma `pagamentos_venda`, não `vendas.forma_pagamento`).
+    Usa a forma e o total já gravados na própria venda — equivalente a uma
+    venda de forma única, que é o que elas sempre foram antes da divisão de
+    pagamento existir.
+    """
+    sem_pagamento = con.execute(
+        """
+        SELECT v.id, v.forma_pagamento, v.total_centavos
+          FROM vendas v
+         WHERE NOT EXISTS (SELECT 1 FROM pagamentos_venda p WHERE p.venda_id = v.id)
+        """
+    ).fetchall()
+    if sem_pagamento:
+        con.executemany(
+            "INSERT INTO pagamentos_venda (venda_id, forma_pagamento, valor_centavos) VALUES (?, ?, ?)",
+            [(v["id"], v["forma_pagamento"], v["total_centavos"]) for v in sem_pagamento],
+        )
+
+
 def inicializar() -> None:
     """Cria as tabelas (se ainda não existirem) e popula o cadastro básico."""
     PASTA_RELATORIOS.mkdir(parents=True, exist_ok=True)
@@ -219,6 +256,7 @@ def inicializar() -> None:
     with transacao() as con:
         _migrar_esquema(con)
         con.executescript(ESQUEMA)
+        _semear_pagamentos_venda_existentes(con)
 
         if con.execute("SELECT COUNT(*) FROM funcionarios").fetchone()[0] == 0:
             con.executemany(
